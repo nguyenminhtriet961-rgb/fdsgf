@@ -1388,15 +1388,18 @@
                 background: var(--surface);
                 border-top: 1px solid var(--border);
                 z-index: 50;
-                padding: 6px 4px 8px;
+                padding: 6px 2px 8px;
+                overflow-x: auto;
             }
 
             .bottom-nav .nav-item {
+                flex: 1 1 0;
+                min-width: 44px;
                 flex-direction: column;
                 gap: 3px;
-                font-size: 10.5px;
+                font-size: 9.5px;
                 align-items: center;
-                padding: 6px 4px;
+                padding: 6px 2px;
             }
 
             .bottom-nav .nav-item.active {
@@ -1405,8 +1408,8 @@
             }
 
             .bottom-nav .nav-item svg {
-                width: 19px;
-                height: 19px;
+                width: 18px;
+                height: 18px;
             }
 
             .sched-grid {
@@ -1519,6 +1522,22 @@
 
             function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 
+            // ===== MÃ ĐỒNG BỘ (dùng để ghép nhiều thiết bị vào cùng 1 dữ liệu) =====
+            // Phải khai báo TRƯỚC state, vì state gọi loadSyncCode() ngay khi khởi tạo.
+            const SYNC_KEY = 'mint_study_space_sync_code';
+            function genSyncCode() {
+                const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // bỏ ký tự dễ nhầm (0,O,1,I)
+                let s = ''; for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
+                return s;
+            }
+            function loadSyncCode() {
+                try {
+                    let v = localStorage.getItem(SYNC_KEY);
+                    if (!v) { v = genSyncCode(); localStorage.setItem(SYNC_KEY, v); }
+                    return v;
+                } catch (e) { return genSyncCode(); }
+            }
+
             // ===== STATE =====
             let state = {
                 subjects: DEFAULT_SUBJECTS,
@@ -1532,6 +1551,7 @@
                 search: '',
                 loaded: false,
                 fbUid: null,
+                syncCode: loadSyncCode(),
                 syncStatus: 'loading', // loading | ok | error
             };
             DAYS.forEach(d => state.schedule[d.key] = {});
@@ -1574,10 +1594,10 @@
                 saveLocal();
                 clearTimeout(saveTimer);
                 saveTimer = setTimeout(async () => {
-                    if (!fbReady || !state.fbUid) return;
+                    if (!fbReady || !state.fbUid || !state.syncCode) return;
                     try {
                         const { db, doc, setDoc } = window.__fb;
-                        await setDoc(doc(db, 'users', state.fbUid, 'data', 'main'), stateToDoc());
+                        await setDoc(doc(db, 'sync_codes', state.syncCode), stateToDoc());
                         setSyncStatus('ok');
                     } catch (e) { setSyncStatus('offline'); console.error(e); }
                 }, 600);
@@ -1593,9 +1613,40 @@
                 if (d.settings) state.settings = Object.assign(state.settings, d.settings);
             }
 
+            // Kết nối (hoặc kết nối lại) tới document Firestore ứng với state.syncCode hiện tại.
+            // Đây là nơi thật sự làm cho "1 máy thêm, máy kia cũng thấy y chang" hoạt động:
+            // mọi thiết bị dùng chung 1 mã đồng bộ sẽ đọc/ghi cùng 1 document, bất kể UID ẩn danh của từng máy khác nhau.
+            async function connectSyncDoc() {
+                if (!window.__fb || !state.syncCode) { setSyncStatus('offline'); return; }
+                const { db, doc, setDoc, getDoc, onSnapshot } = window.__fb;
+                const ref = doc(db, 'sync_codes', state.syncCode);
+                try {
+                    const snap = await getDoc(ref);
+                    if (snap.exists()) {
+                        // Đã có dữ liệu chung cho mã này (máy khác đã tạo trước) — nạp về, ưu tiên dữ liệu chung.
+                        applyDoc(snap.data()); saveLocal();
+                    } else {
+                        // Mã đồng bộ mới toanh — đẩy dữ liệu hiện có trên máy này lên làm dữ liệu gốc.
+                        await setDoc(ref, stateToDoc());
+                    }
+                } catch (e) { console.warn('First load failed', e); }
+                render();
+                setSyncStatus('ok');
+
+                // Real-time listener — mọi thay đổi từ máy khác sẽ tự động phản ánh vào máy này.
+                if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+                unsubscribe = onSnapshot(ref, snap => {
+                    if (!snap.exists()) return;
+                    applyDoc(snap.data());
+                    saveLocal();
+                    setSyncStatus('ok');
+                    render();
+                }, () => { setSyncStatus('offline'); });
+            }
+
             async function initFirebase() {
                 if (!window.__fb) { setSyncStatus('offline'); return; }
-                const { db, doc, getDoc, onSnapshot, auth, signInAnonymously, onAuthStateChanged } = window.__fb;
+                const { auth, signInAnonymously, onAuthStateChanged } = window.__fb;
                 try {
                     onAuthStateChanged(auth, async user => {
                         if (!user) {
@@ -1603,26 +1654,22 @@
                             return;
                         }
                         state.fbUid = user.uid;
-                        const ref = doc(db, 'users', user.uid, 'data', 'main');
-                        // Load once first — chỉ ghi đè dữ liệu máy nếu server có dữ liệu
-                        try {
-                            const snap = await getDoc(ref);
-                            if (snap.exists()) { applyDoc(snap.data()); saveLocal(); }
-                        } catch (e) { console.warn('First load failed', e); }
-                        render();
-                        setSyncStatus('ok');
-
-                        // Then real-time listener
-                        if (unsubscribe) unsubscribe();
-                        unsubscribe = onSnapshot(ref, snap => {
-                            if (!snap.exists()) return;
-                            applyDoc(snap.data());
-                            saveLocal();
-                            setSyncStatus('ok');
-                            render();
-                        }, () => { setSyncStatus('offline'); });
+                        connectSyncDoc();
                     });
                 } catch (e) { setSyncStatus('offline'); }
+            }
+
+            // Liên kết máy này với mã đồng bộ của 1 máy khác (nhập mã từ Cài đặt).
+            function relinkSync(newCode) {
+                newCode = (newCode || '').trim().toUpperCase();
+                if (!newCode) { toast('Nhập mã đồng bộ đã bạn'); return; }
+                try { localStorage.setItem(SYNC_KEY, newCode); } catch (e) { }
+                state.syncCode = newCode;
+                if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+                setSyncStatus('loading'); render();
+                if (fbReady && window.__fb) connectSyncDoc();
+                else setSyncStatus('offline');
+                toast('Đang liên kết với mã ' + newCode + '...');
             }
 
             window.addEventListener('fb-ready', () => { fbReady = true; initFirebase(); });
@@ -1824,7 +1871,7 @@
       </div>
       <div class="main">${renderPage()}</div>
     </div>
-    <div class="bottom-nav">${navItems().slice(0, 5).map(navBtn).join('')}</div>
+    <div class="bottom-nav">${navItems().map(navBtn).join('')}</div>
   `;
                 bindNav();
                 bindPageEvents();
@@ -2202,10 +2249,24 @@
         <button class="btn btn-ghost" data-retryfb="1">Thử kết nối lại</button>
       </div>
       <div class="settings-row">
-        <div><div class="settings-label">Firebase UID</div><div class="settings-help" style="font-family:monospace;font-size:11px">${state.fbUid || 'Chưa kết nối'}</div></div>
+        <div style="width:100%">
+          <div class="settings-label">Mã đồng bộ của máy này</div>
+          <div class="settings-help">Nhập đúng mã này trên thiết bị khác (mục bên dưới) để 2 máy dùng chung dữ liệu — thêm/sửa ở máy nào, máy kia cũng tự cập nhật.</div>
+          <div style="display:flex;gap:8px;margin-top:6px;align-items:center">
+            <input type="text" id="mySyncCode" value="${state.syncCode || ''}" readonly style="font-family:monospace;font-weight:700;letter-spacing:2px;flex:1">
+            <button class="btn btn-ghost" data-copysync="1">Sao chép</button>
+          </div>
+        </div>
       </div>
       <div class="settings-row">
-        <div><div class="settings-label">Đồng bộ đa thiết bị</div><div class="settings-help">Mở file HTML này trên bất kỳ trình duyệt nào, đăng nhập cùng UID sẽ dùng chung dữ liệu. UID được lưu trong trình duyệt (IndexedDB).</div></div>
+        <div style="width:100%">
+          <div class="settings-label">Liên kết với thiết bị khác</div>
+          <div class="settings-help">Dán mã đồng bộ lấy từ máy kia vào đây rồi bấm Liên kết.</div>
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <input type="text" id="otherSyncCode" placeholder="VD: A1B2C3" style="flex:1;text-transform:uppercase;font-family:monospace">
+            <button class="btn btn-primary" data-linksync="1">Liên kết</button>
+          </div>
+        </div>
       </div>
     </div>
   `;
@@ -2227,6 +2288,8 @@
                 const mg = document.querySelector('[data-openmgr]'); if (mg) mg.addEventListener('click', () => { state.page = 'settings'; render(); });
                 const imp = document.querySelector('[data-importtkb]'); if (imp) imp.addEventListener('click', openImportTkbModal);
                 const rf = document.querySelector('[data-retryfb]'); if (rf) rf.addEventListener('click', () => { setSyncStatus('loading'); fbReady = false; setTimeout(() => { if (window.__fb) { fbReady = true; initFirebase(); } else { setSyncStatus('offline'); toast('Không tải được Firebase — kiểm tra mạng/trình chặn quảng cáo'); } }, 300); setTimeout(() => { if (state.syncStatus === 'loading') setSyncStatus('offline'); }, 6000); });
+                const cs = document.querySelector('[data-copysync]'); if (cs) cs.addEventListener('click', () => { const el = document.getElementById('mySyncCode'); try { el.select(); navigator.clipboard.writeText(state.syncCode); } catch (e) { try { document.execCommand('copy'); } catch (e2) { } } toast('Đã sao chép mã đồng bộ'); });
+                const lks = document.querySelector('[data-linksync]'); if (lks) lks.addEventListener('click', () => { const v = document.getElementById('otherSyncCode').value; relinkSync(v); });
                 document.querySelectorAll('[data-theme-set]').forEach(b => b.addEventListener('click', () => { state.settings.theme = b.getAttribute('data-theme-set'); applyTheme(); persist(); render(); }));
                 const sb = document.querySelector('[data-toggle-sound]'); if (sb) sb.addEventListener('click', () => { state.settings.sound = !state.settings.sound; persist(); render(); });
                 const rn = document.querySelector('[data-req-notif]'); if (rn) rn.addEventListener('click', async () => { if (!('Notification' in window)) { toast('Trình duyệt không hỗ trợ'); return; } const p = await Notification.requestPermission(); state.settings.notifPermission = p; persist(); render(); if (p === 'granted') toast('Đã bật thông báo!'); });
@@ -2314,8 +2377,35 @@
                 }));
             }
 
-            function openImportTkbModal() {
-                if (typeof XLSX === 'undefined') { toast('Không tải được thư viện đọc Excel — kiểm tra kết nối mạng'); return; }
+            // Nạp thư viện đọc Excel theo yêu cầu (khi bấm nút), có 2 nguồn dự phòng —
+            // trước đây nếu cdnjs bị mạng/trình chặn quảng cáo chặn thì bấm nút không có phản ứng gì rõ ràng.
+            function ensureXLSX() {
+                return new Promise((resolve, reject) => {
+                    if (typeof XLSX !== 'undefined') { resolve(); return; }
+                    const urls = [
+                        'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
+                        'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
+                    ];
+                    let i = 0;
+                    (function tryNext() {
+                        if (i >= urls.length) { reject(new Error('xlsx load failed')); return; }
+                        const s = document.createElement('script');
+                        s.src = urls[i++];
+                        s.onload = () => { if (typeof XLSX !== 'undefined') resolve(); else tryNext(); };
+                        s.onerror = tryNext;
+                        document.head.appendChild(s);
+                    })();
+                });
+            }
+
+            async function openImportTkbModal() {
+                if (typeof XLSX === 'undefined') {
+                    toast('Đang tải thư viện đọc Excel...');
+                    try { await ensureXLSX(); } catch (e) {
+                        toast('Không tải được thư viện đọc Excel — kiểm tra mạng hoặc tắt trình chặn quảng cáo rồi bấm lại nút Nhập TKB');
+                        return;
+                    }
+                }
                 const bd = document.createElement('div'); bd.className = 'modal-backdrop';
                 bd.innerHTML = `<div class="modal">
     <h3>📥 Nhập TKB từ Excel</h3>
