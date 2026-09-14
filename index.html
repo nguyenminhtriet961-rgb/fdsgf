@@ -5,7 +5,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MinT's Study Space</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link
         href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Sora:wght@400;500;600;700&display=swap"
@@ -2021,7 +2020,7 @@
     <div class="page-header">
       <div><h1 class="page-title">TKB tuần</h1><div class="page-sub">Bấm vào ô để gán môn</div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-primary" data-importtkb="1">📥 Nhập TKB từ Excel</button>
+        <button class="btn btn-primary" data-importtkb="1">📥 Nhập TKB</button>
         <button class="btn btn-ghost" data-openmgr="1">Quản lý môn học</button>
       </div>
     </div>
@@ -2377,143 +2376,40 @@
                 }));
             }
 
-            // Nạp thư viện đọc Excel theo yêu cầu (khi bấm nút), có 2 nguồn dự phòng —
-            // trước đây nếu cdnjs bị mạng/trình chặn quảng cáo chặn thì bấm nút không có phản ứng gì rõ ràng.
-            function ensureXLSX() {
-                return new Promise((resolve, reject) => {
-                    if (typeof XLSX !== 'undefined') { resolve(); return; }
-                    const urls = [
-                        'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
-                        'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
-                    ];
-                    let i = 0;
-                    (function tryNext() {
-                        if (i >= urls.length) { reject(new Error('xlsx load failed')); return; }
-                        const s = document.createElement('script');
-                        s.src = urls[i++];
-                        s.onload = () => { if (typeof XLSX !== 'undefined') resolve(); else tryNext(); };
-                        s.onerror = tryNext;
-                        document.head.appendChild(s);
-                    })();
-                });
-            }
+            // Nhập TKB giờ gộp về 1 trang riêng (nhap-tkb.html) — trang đó có thể mở trên bất kỳ máy
+            // nào có sẵn file Excel TKB, tự đồng bộ về máy này qua mã đồng bộ. Ở đây chỉ tạo link kèm
+            // mã đồng bộ + lớp hiện tại (điền sẵn cho đỡ gõ lại) và cho sao chép / quét QR sang máy khác.
+            function openImportTkbModal() {
+                const params = new URLSearchParams();
+                if (state.syncCode) params.set('code', state.syncCode);
+                if (state.settings.myClass) params.set('class', state.settings.myClass);
+                const qs = params.toString();
+                const url = new URL('nhap-tkb.html' + (qs ? '?' + qs : ''), location.href).href;
 
-            async function openImportTkbModal() {
-                if (typeof XLSX === 'undefined') {
-                    toast('Đang tải thư viện đọc Excel...');
-                    try { await ensureXLSX(); } catch (e) {
-                        toast('Không tải được thư viện đọc Excel — kiểm tra mạng hoặc tắt trình chặn quảng cáo rồi bấm lại nút Nhập TKB');
-                        return;
-                    }
-                }
                 const bd = document.createElement('div'); bd.className = 'modal-backdrop';
                 bd.innerHTML = `<div class="modal">
-    <h3>📥 Nhập TKB từ Excel</h3>
+    <h3>📥 Nhập TKB</h3>
+    <div class="settings-help" style="margin-bottom:10px">Mở link này trên máy đang có sẵn file TKB Excel của trường (điện thoại khác, máy tính ở trường...) — mã đồng bộ và lớp của bạn đã được điền sẵn. Nhập xong, dữ liệu tự về máy này.</div>
+    <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(url)}" alt="Mã QR trang nhập TKB" style="display:block;margin:0 auto 12px;border-radius:8px;border:1px solid var(--border)">
     <div class="field">
-      <label>Chọn file .xls / .xlsx</label>
-      <input type="file" id="tkb_file" accept=".xls,.xlsx">
-      <div class="settings-help" style="margin-top:4px">Dùng lại mỗi khi trường đổi TKB tuần mới — không cần bấm tay từng ô.</div>
+      <label>Link nhập TKB</label>
+      <input type="text" id="tkb_link" value="${esc(url)}" readonly style="font-size:12.5px">
     </div>
-    <div id="tkb_config"></div>
-    <div class="modal-actions"><button class="btn btn-ghost" id="f_cancel">Huỷ</button><button class="btn btn-primary" id="f_apply" style="display:none">Nhập vào TKB</button></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="f_cancel">Đóng</button>
+      <button class="btn btn-ghost" id="f_copy">Sao chép link</button>
+      <button class="btn btn-primary" id="f_open">Mở trang này</button>
+    </div>
   </div>`;
                 document.body.appendChild(bd);
                 bd.addEventListener('click', e => { if (e.target === bd) bd.remove(); });
                 bd.querySelector('#f_cancel').addEventListener('click', () => bd.remove());
-
-                let parsedSheets = []; // {name, grid, headerRow, classCols:[{name,col}]}
-
-                function normalize(s) { return (s || '').toString().trim(); }
-
-                function findHeaderRow(grid) {
-                    for (let r = 0; r < Math.min(grid.length, 8); r++) {
-                        if (normalize(grid[r][1]).toLowerCase() === 'tiết') return r;
-                    }
-                    return -1;
-                }
-
-                bd.querySelector('#tkb_file').addEventListener('change', async e => {
-                    const file = e.target.files[0]; if (!file) return;
-                    const buf = await file.arrayBuffer();
-                    const wb = XLSX.read(buf, { type: 'array' });
-                    parsedSheets = wb.SheetNames.map(name => {
-                        const grid = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '' });
-                        const headerRow = findHeaderRow(grid);
-                        const classCols = [];
-                        if (headerRow >= 0) {
-                            for (let c = 2; c < grid[headerRow].length; c++) {
-                                const v = normalize(grid[headerRow][c]);
-                                if (v) classCols.push({ name: v, col: c });
-                            }
-                        }
-                        return { name, grid, headerRow, classCols };
-                    }).filter(s => s.headerRow >= 0 && s.classCols.length > 0);
-
-                    if (parsedSheets.length === 0) {
-                        toast('Không nhận diện được cấu trúc TKB trong file này');
-                        bd.querySelector('#tkb_config').innerHTML = '';
-                        bd.querySelector('#f_apply').style.display = 'none';
-                        return;
-                    }
-
-                    const cfgEl = bd.querySelector('#tkb_config');
-                    cfgEl.innerHTML = parsedSheets.map((s, i) => {
-                        const guess = s.name.toLowerCase().includes('sáng') ? 'morning' : s.name.toLowerCase().includes('chiều') ? 'afternoon' : 'skip';
-                        const myClassIdx = s.classCols.findIndex(c => c.name.toLowerCase() === (state.settings.myClass || '').toLowerCase());
-                        return `
-        <div class="field" style="border:1px solid var(--border);border-radius:8px;padding:10px">
-          <label>Sheet "${esc(s.name)}"</label>
-          <select data-sheetrole="${i}">
-            <option value="skip" ${guess === 'skip' ? 'selected' : ''}>— Bỏ qua sheet này —</option>
-            <option value="morning" ${guess === 'morning' ? 'selected' : ''}>Buổi Sáng (Tiết 1–5 sáng)</option>
-            <option value="afternoon" ${guess === 'afternoon' ? 'selected' : ''}>Buổi Chiều (Tiết 1–5 chiều)</option>
-          </select>
-          <select data-sheetclass="${i}" style="margin-top:6px">
-            ${s.classCols.map((c, ci) => `<option value="${ci}" ${ci === (myClassIdx >= 0 ? myClassIdx : 0) ? 'selected' : ''}>Lớp ${esc(c.name)}</option>`).join('')}
-          </select>
-        </div>`;
-                    }).join('');
-                    bd.querySelector('#f_apply').style.display = '';
-                });
-
-                bd.querySelector('#f_apply').addEventListener('click', () => {
-                    const newSchedule = {}; DAYS.forEach(d => newSchedule[d.key] = {});
-                    let filled = 0, chosenClassName = state.settings.myClass;
-
-                    parsedSheets.forEach((s, i) => {
-                        const role = bd.querySelector(`[data-sheetrole="${i}"]`).value;
-                        if (role === 'skip') return;
-                        const offset = role === 'afternoon' ? 5 : 0;
-                        const classIdx = +bd.querySelector(`[data-sheetclass="${i}"]`).value;
-                        const { col, name: className } = s.classCols[classIdx];
-                        chosenClassName = className;
-
-                        let dayKey = null;
-                        for (let r = s.headerRow + 1; r < s.grid.length; r++) {
-                            const row = s.grid[r];
-                            const dayCell = normalize(row[0]);
-                            if (dayCell) {
-                                const m = dayCell.match(/[2-7]/);
-                                dayKey = m ? 'T' + m[0] : null;
-                            }
-                            const tietCell = normalize(row[1]);
-                            if (/^phòng$/i.test(tietCell)) continue;
-                            const tietNum = parseInt(tietCell, 10);
-                            if (!dayKey || isNaN(tietNum) || !newSchedule[dayKey]) continue;
-                            const val = normalize(row[col]);
-                            if (!val) continue;
-                            const subjName = subjectNameFromCode(val);
-                            const subj = findOrCreateSubject(subjName);
-                            newSchedule[dayKey][tietNum + offset] = subj.id;
-                            filled++;
-                        }
-                    });
-
-                    if (filled === 0) { toast('Không tìm thấy tiết học nào cho lớp đã chọn'); return; }
-                    state.schedule = newSchedule;
-                    state.settings.myClass = chosenClassName;
-                    persist(); bd.remove(); render();
-                    toast(`Đã nhập TKB — ${filled} tiết cho lớp ${chosenClassName}`);
+                bd.querySelector('#f_open').addEventListener('click', () => window.open(url, '_blank'));
+                bd.querySelector('#f_copy').addEventListener('click', () => {
+                    const input = bd.querySelector('#tkb_link');
+                    try { navigator.clipboard.writeText(url); }
+                    catch (e) { try { input.select(); document.execCommand('copy'); } catch (e2) { } }
+                    toast('Đã sao chép link');
                 });
             }
 

@@ -191,6 +191,16 @@
         const syncInput = document.getElementById('syncCode');
         const myClassInput = document.getElementById('myClass');
 
+        // Nếu mở từ link do app chính tạo (?code=...&class=...), điền sẵn cho đỡ gõ lại.
+        (function prefillFromLink() {
+            const params = new URLSearchParams(location.search);
+            const code = (params.get('code') || '').trim().toUpperCase();
+            const cls = (params.get('class') || '').trim();
+            if (code) syncInput.value = code;
+            if (cls) myClassInput.value = cls;
+            if (code || cls) toast('Đã điền sẵn mã đồng bộ / lớp từ link — kiểm tra lại rồi chọn file Excel');
+        })();
+
         function findHeaderRow(grid) {
             for (let r = 0; r < Math.min(grid.length, 8); r++) {
                 if (normalize(grid[r][1]).toLowerCase() === 'tiết') return r;
