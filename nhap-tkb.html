@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nhập TKB — MinT's Study Space</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --mint-500: #17a874;
+            --mint-600: #0f8f61;
+            --mint-700: #0c6f4d;
+            --bg: #f6f4ee;
+            --surface: #ffffff;
+            --surface-2: #fbfaf6;
+            --border: #e1ddd0;
+            --text: #1c2b26;
+            --text-dim: #5b6b64;
+            --text-faint: #8a978f;
+            --danger: #c24545;
+            --radius: 10px;
+            --shadow: 0 1px 2px rgba(20, 30, 25, 0.04);
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: 'Sora', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            padding: 20px 14px 60px;
+        }
+
+        .wrap { max-width: 560px; margin: 0 auto; }
+
+        h1 { font-size: 20px; margin: 4px 0 2px; }
+        .sub { color: var(--text-dim); font-size: 13.5px; margin: 0 0 20px; }
+
+        .step {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px;
+            margin-bottom: 14px;
+            box-shadow: var(--shadow);
+        }
+        .step.disabled { opacity: .55; pointer-events: none; }
+        .step-title { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14.5px; margin-bottom: 10px; }
+        .step-num {
+            width: 22px; height: 22px; border-radius: 50%; background: var(--mint-600); color: #fff;
+            display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0;
+        }
+        label { display: block; font-size: 13px; color: var(--text-dim); margin-bottom: 5px; }
+        input[type="text"], input[type="file"], select {
+            width: 100%; padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px;
+            background: var(--surface-2); color: var(--text); font-family: inherit; font-size: 14px;
+        }
+        input[type="text"] { font-family: monospace; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
+        .help { font-size: 12px; color: var(--text-faint); margin-top: 5px; line-height: 1.4; }
+        .sheet-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin-top: 10px; background: var(--surface-2); }
+        .sheet-card label { margin-bottom: 4px; }
+        .sheet-card select { margin-bottom: 8px; }
+        .sheet-card select:last-child { margin-bottom: 0; }
+        .btn {
+            width: 100%; padding: 12px; border: none; border-radius: 8px; font-family: inherit;
+            font-size: 14.5px; font-weight: 600; cursor: pointer;
+        }
+        .btn-primary { background: var(--mint-600); color: #fff; }
+        .btn-primary:disabled { background: #a9c9bd; cursor: not-allowed; }
+        .btn-primary:hover:not(:disabled) { background: var(--mint-700); }
+        #toast {
+            position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px);
+            background: var(--text); color: #fff; padding: 10px 16px; border-radius: 8px; font-size: 13.5px;
+            opacity: 0; transition: .25s; pointer-events: none; max-width: 90vw; text-align: center; z-index: 50;
+        }
+        #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+        .status-line { font-size: 12.5px; margin-top: 8px; }
+        .status-ok { color: var(--mint-700); }
+        .status-err { color: var(--danger); }
+        .badge-soon {
+            font-size: 11px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-faint);
+            padding: 2px 8px; border-radius: 999px; margin-left: auto;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="wrap">
+        <h1>📥 Nhập TKB vào tài khoản</h1>
+        <p class="sub">Dán mã đồng bộ của máy bạn, tải file TKB tổng của trường lên, chọn đúng lớp — dữ liệu sẽ tự
+            đồng bộ về app MinT's Study Space trên máy đó.</p>
+
+        <div class="step">
+            <div class="step-title"><span class="step-num">1</span> Mã đồng bộ máy</div>
+            <input type="text" id="syncCode" placeholder="VD: 7K2P9X" maxlength="12">
+            <div class="help">Mở app chính → Cài đặt → mục "Mã đồng bộ" → bấm Sao chép → dán vào đây. Nếu mã sai
+                hoặc chưa từng tạo, dữ liệu sẽ không vào đúng máy của bạn.</div>
+        </div>
+
+        <div class="step">
+            <div class="step-title"><span class="step-num">2</span> Lớp của bạn</div>
+            <input type="text" id="myClass" placeholder="VD: 10X4" style="text-transform:none;letter-spacing:normal">
+            <div class="help">Gõ đúng tên lớp như trong file TKB tổng của trường (VD: 10X4). Khi tải file ở bước
+                dưới, app sẽ tự lọc đúng cột của lớp này.</div>
+        </div>
+
+        <div class="step">
+            <div class="step-title"><span class="step-num">3</span> File TKB Excel (.xls / .xlsx)</div>
+            <input type="file" id="tkbFile" accept=".xls,.xlsx">
+            <div class="help">Dùng file TKB tổng của trường (nhiều lớp trong 1 file) — giống file vẫn dùng để nhập
+                trong app chính. Mỗi sheet sẽ tự chọn đúng cột lớp bạn đã gõ ở trên — nếu không khớp, tự chọn tay lại
+                được.</div>
+            <div id="sheetConfig"></div>
+        </div>
+
+        <div class="step disabled">
+            <div class="step-title">Quét ảnh / file bằng AI <span class="badge-soon">Sắp ra mắt</span></div>
+            <div class="help">Chụp ảnh TKB rồi để AI tự đọc — đang chờ có API key, làm sau khi phần Excel chạy ổn.
+            </div>
+        </div>
+
+        <button class="btn btn-primary" id="applyBtn" disabled>Nhập vào tài khoản</button>
+        <div class="status-line" id="statusLine"></div>
+    </div>
+
+    <div id="toast"></div>
+
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+        import { getFirestore, doc, getDoc, setDoc } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+        import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+
+        // Cùng project Firebase với app chính — mã đồng bộ trỏ chung 1 document.
+        const firebaseConfig = {
+            apiKey: "AIzaSyDMQ4VWi52j9FgThyAEUtjp-MCDpEnD_J8",
+            authDomain: "school-11daf.firebaseapp.com",
+            projectId: "school-11daf",
+            storageBucket: "school-11daf.firebasestorage.app",
+            messagingSenderId: "195597639178",
+            appId: "1:195597639178:web:721206e1fdc85a6a9409f3",
+            measurementId: "G-BLY9ESM20D"
+        };
+        const fbApp = initializeApp(firebaseConfig);
+        const db = getFirestore(fbApp);
+        const auth = getAuth(fbApp);
+
+        let fbUid = null;
+        onAuthStateChanged(auth, async user => {
+            if (!user) { try { await signInAnonymously(auth); } catch (e) { } return; }
+            fbUid = user.uid;
+        });
+
+        // ===== Cùng bảng ánh xạ mã môn như app chính =====
+        const SUBJECT_CODE_MAP = {
+            'Toán': 'Toán', 'Văn': 'Ngữ Văn', 'Av': 'Tiếng Anh', 'Lí': 'Vật Lý', 'Hóa': 'Hoá Học',
+            'Sinh': 'Sinh Học', 'Sử': 'Lịch Sử', 'Địa': 'Địa Lý', 'GDCD': 'GDCD/KTPL', 'KTPL': 'GDCD/KTPL',
+            'Tin': 'Tin Học', 'QP': 'GDQP-AN', 'Td': 'Thể Dục', 'Cnghệ': 'Công Nghệ', 'GDĐP': 'Giáo Dục Địa Phương',
+            'SHCN': 'Sinh Hoạt Chủ Nhiệm', 'SHĐT': 'Sinh Hoạt Dưới Cờ', 'HĐTN': 'Hoạt Động Trải Nghiệm',
+        };
+        const DEFAULT_COLORS = ['#17a874', '#2f7fd6', '#d9a441', '#c2508a', '#6b5bd6', '#3aa6a0', '#d9673f', '#5b8c3a', '#a05bd6', '#3f7fb0', '#c24545', '#8a8f3a', '#7a6a53', '#5c6bc0', '#8d6e63', '#455a64', '#00897b', '#ad1457', '#6d4c41', '#26a69a'];
+        const DAYS = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+
+        function subjectNameFromCode(cellValue) {
+            let left = cellValue.split('-')[0].trim();
+            if (left.startsWith('CĐ')) left = left.slice(2);
+            return SUBJECT_CODE_MAP[left] || left;
+        }
+        function normalize(s) { return (s || '').toString().trim(); }
+        function uid() { return 'x' + Math.random().toString(36).slice(2, 10); }
+
+        function toast(msg, ms = 3200) {
+            const t = document.getElementById('toast');
+            t.textContent = msg; t.classList.add('show');
+            clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), ms);
+        }
+        function setStatus(msg, kind) {
+            const el = document.getElementById('statusLine');
+            el.textContent = msg;
+            el.className = 'status-line' + (kind ? ' status-' + kind : '');
+        }
+
+        // ===== Đọc Excel — giống hệt logic trong app chính =====
+        let parsedSheets = [];
+        const cfgEl = document.getElementById('sheetConfig');
+        const fileInput = document.getElementById('tkbFile');
+        const applyBtn = document.getElementById('applyBtn');
+        const syncInput = document.getElementById('syncCode');
+        const myClassInput = document.getElementById('myClass');
+
+        function findHeaderRow(grid) {
+            for (let r = 0; r < Math.min(grid.length, 8); r++) {
+                if (normalize(grid[r][1]).toLowerCase() === 'tiết') return r;
+            }
+            return -1;
+        }
+
+        fileInput.addEventListener('change', async e => {
+            const file = e.target.files[0]; if (!file) return;
+            const buf = await file.arrayBuffer();
+            const wb = XLSX.read(buf, { type: 'array' });
+            parsedSheets = wb.SheetNames.map(name => {
+                const grid = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '' });
+                const headerRow = findHeaderRow(grid);
+                const classCols = [];
+                if (headerRow >= 0) {
+                    for (let c = 2; c < grid[headerRow].length; c++) {
+                        const v = normalize(grid[headerRow][c]);
+                        if (v) classCols.push({ name: v, col: c });
+                    }
+                }
+                return { name, grid, headerRow, classCols };
+            }).filter(s => s.headerRow >= 0 && s.classCols.length > 0);
+
+            if (parsedSheets.length === 0) {
+                toast('Không nhận diện được cấu trúc TKB trong file này');
+                cfgEl.innerHTML = ''; applyBtn.disabled = true;
+                return;
+            }
+
+            const wantedClass = (myClassInput.value || '').trim().toLowerCase();
+            cfgEl.innerHTML = parsedSheets.map((s, i) => {
+                const guess = s.name.toLowerCase().includes('sáng') ? 'morning' : s.name.toLowerCase().includes('chiều') ? 'afternoon' : 'skip';
+                const matchIdx = s.classCols.findIndex(c => c.name.toLowerCase() === wantedClass);
+                const noMatch = wantedClass && matchIdx < 0;
+                return `
+        <div class="sheet-card">
+          <label>Sheet "${s.name}"${noMatch ? ' — <span style="color:var(--danger)">không thấy lớp bạn gõ, chọn tay bên dưới</span>' : ''}</label>
+          <select data-sheetrole="${i}">
+            <option value="skip" ${guess === 'skip' ? 'selected' : ''}>— Bỏ qua sheet này —</option>
+            <option value="morning" ${guess === 'morning' ? 'selected' : ''}>Buổi Sáng (Tiết 1–5)</option>
+            <option value="afternoon" ${guess === 'afternoon' ? 'selected' : ''}>Buổi Chiều (Tiết 1–5)</option>
+          </select>
+          <select data-sheetclass="${i}">
+            ${s.classCols.map((c, ci) => `<option value="${ci}" ${ci === (matchIdx >= 0 ? matchIdx : 0) ? 'selected' : ''}>Lớp ${c.name}</option>`).join('')}
+          </select>
+        </div>`;
+            }).join('');
+            applyBtn.disabled = false;
+        });
+
+        fileInput.addEventListener('click', e => {
+            if (!(myClassInput.value || '').trim()) { e.preventDefault(); toast('Gõ tên lớp của bạn trước đã (bước 2)'); }
+        });
+
+        applyBtn.addEventListener('click', async () => {
+            const code = (syncInput.value || '').trim().toUpperCase();
+            const myClass = (myClassInput.value || '').trim();
+            if (!code) { toast('Nhập mã đồng bộ trước đã bạn'); return; }
+            if (!myClass) { toast('Gõ tên lớp của bạn trước đã bạn'); return; }
+            if (parsedSheets.length === 0) { toast('Chưa chọn file Excel'); return; }
+
+            applyBtn.disabled = true;
+            setStatus('Đang kết nối...', '');
+
+            try {
+                const ref = doc(db, 'sync_codes', code);
+                const snap = await getDoc(ref);
+                if (!snap.exists()) {
+                    setStatus('Không tìm thấy mã đồng bộ này — mở app chính trên máy bạn trước để tạo mã, rồi thử lại.', 'err');
+                    applyBtn.disabled = false;
+                    return;
+                }
+                const docData = snap.data() || {};
+                const subjects = Array.isArray(docData.subjects) ? docData.subjects.slice() : [];
+
+                function findOrCreateSubject(name) {
+                    let s = subjects.find(x => x.name.toLowerCase() === name.toLowerCase());
+                    if (s) return s;
+                    const usedColors = new Set(subjects.map(x => x.color));
+                    const color = DEFAULT_COLORS.find(c => !usedColors.has(c)) || '#888888';
+                    s = { id: uid(), name, color };
+                    subjects.push(s);
+                    return s;
+                }
+
+                const newSchedule = {}; DAYS.forEach(d => newSchedule[d] = {});
+                let filled = 0, chosenClassName = myClass;
+
+                parsedSheets.forEach((s, i) => {
+                    const role = cfgEl.querySelector(`[data-sheetrole="${i}"]`).value;
+                    if (role === 'skip') return;
+                    const offset = role === 'afternoon' ? 5 : 0;
+                    const classIdx = +cfgEl.querySelector(`[data-sheetclass="${i}"]`).value;
+                    const { col, name: className } = s.classCols[classIdx];
+                    chosenClassName = className;
+
+                    let dayKey = null;
+                    for (let r = s.headerRow + 1; r < s.grid.length; r++) {
+                        const row = s.grid[r];
+                        const dayCell = normalize(row[0]);
+                        if (dayCell) {
+                            const m = dayCell.match(/[2-7]/);
+                            dayKey = m ? 'T' + m[0] : null;
+                        }
+                        const tietCell = normalize(row[1]);
+                        if (/^phòng$/i.test(tietCell)) continue;
+                        const tietNum = parseInt(tietCell, 10);
+                        if (!dayKey || isNaN(tietNum) || !newSchedule[dayKey]) continue;
+                        const val = normalize(row[col]);
+                        if (!val) continue;
+                        const subjName = subjectNameFromCode(val);
+                        const subj = findOrCreateSubject(subjName);
+                        newSchedule[dayKey][tietNum + offset] = subj.id;
+                        filled++;
+                    }
+                });
+
+                if (filled === 0) {
+                    setStatus('Không tìm thấy tiết học nào cho lớp đã chọn trong file này.', 'err');
+                    applyBtn.disabled = false;
+                    return;
+                }
+
+                const newSettings = Object.assign({}, docData.settings || {}, { myClass: chosenClassName });
+                await setDoc(ref, { subjects, schedule: newSchedule, settings: newSettings }, { merge: true });
+
+                setStatus(`Đã nhập ${filled} tiết cho lớp ${chosenClassName} — mở lại app chính để xem.`, 'ok');
+                toast('Nhập TKB thành công!');
+            } catch (e) {
+                console.error(e);
+                setStatus('Có lỗi khi kết nối tới máy chủ — kiểm tra mạng rồi thử lại.', 'err');
+            } finally {
+                applyBtn.disabled = false;
+            }
+        });
+    </script>
+</body>
+
+</html>
